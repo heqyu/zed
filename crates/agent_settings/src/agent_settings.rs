@@ -168,6 +168,7 @@ pub struct AgentSettings {
     pub cancel_generation_on_terminal_stop: bool,
     pub use_modifier_to_send: bool,
     pub message_editor_min_lines: usize,
+    pub prompt_history_preview_max_chars: usize,
     pub show_turn_stats: bool,
     pub show_merge_conflict_indicator: bool,
     pub tool_permissions: ToolPermissions,
@@ -689,6 +690,9 @@ impl Settings for AgentSettings {
             cancel_generation_on_terminal_stop: agent.cancel_generation_on_terminal_stop.unwrap(),
             use_modifier_to_send: agent.use_modifier_to_send.unwrap(),
             message_editor_min_lines: agent.message_editor_min_lines.unwrap(),
+            prompt_history_preview_max_chars: agent
+                .prompt_history_preview_max_chars
+                .unwrap_or(32),
             show_turn_stats: agent.show_turn_stats.unwrap(),
             show_merge_conflict_indicator: agent.show_merge_conflict_indicator.unwrap(),
             tool_permissions: compile_tool_permissions(agent.tool_permissions),

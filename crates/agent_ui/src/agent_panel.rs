@@ -1184,6 +1184,9 @@ pub struct AgentPanel {
     pending_terminal_spawn: Option<TerminalId>,
     new_thread_menu_handle: PopoverMenuHandle<ContextMenu>,
     agent_panel_menu_handle: PopoverMenuHandle<ContextMenu>,
+    prompt_history_menu_handle: PopoverMenuHandle<ContextMenu>,
+    prompt_history: crate::prompt_history::PromptHistory,
+    _prompt_history_subscription: Option<Subscription>,
     _extension_subscription: Option<Subscription>,
     _project_subscription: Subscription,
     zoomed: bool,
@@ -1589,6 +1592,9 @@ impl AgentPanel {
             pending_terminal_spawn: None,
             new_thread_menu_handle: PopoverMenuHandle::default(),
             agent_panel_menu_handle: PopoverMenuHandle::default(),
+            prompt_history_menu_handle: PopoverMenuHandle::default(),
+            prompt_history: crate::prompt_history::PromptHistory::default(),
+            _prompt_history_subscription: None,
 
             _extension_subscription: extension_subscription,
             _project_subscription,
@@ -4285,10 +4291,12 @@ impl AgentPanel {
                     }));
                 let cv = conversation_view.clone();
                 self.observe_active_draft_for_empty_editor(&cv, cx);
+                self.install_prompt_history_subscription(&cv, cx);
                 Some(cx.observe_in(&cv, window, |this, server_view, window, cx| {
                     this._thread_view_subscription =
                         Self::subscribe_to_active_thread_view(&server_view, window, cx);
                     this.observe_active_draft_for_empty_editor(&server_view, cx);
+                    this.install_prompt_history_subscription(&server_view, cx);
                     cx.emit(AgentPanelEvent::ActiveViewChanged);
                     this.serialize(cx);
                     cx.notify();
@@ -4296,6 +4304,8 @@ impl AgentPanel {
             }
             BaseView::Terminal { terminal_id } => {
                 self._thread_view_subscription = None;
+                self._prompt_history_subscription = None;
+                self.prompt_history.reset();
                 if let Some(terminal) = self.terminals.get(terminal_id) {
                     let terminal_id = *terminal_id;
                     let focus_handle = terminal.view.focus_handle(cx);
@@ -4317,6 +4327,8 @@ impl AgentPanel {
             BaseView::Uninitialized => {
                 self._thread_view_subscription = None;
                 self._active_thread_focus_subscription = None;
+                self._prompt_history_subscription = None;
+                self.prompt_history.reset();
                 None
             }
         };
@@ -4388,6 +4400,58 @@ impl AgentPanel {
                 },
             )
         })
+    }
+
+    /// (Re)install the subscription that captures user prompts into
+    /// `self.prompt_history` for the currently active thread.
+    ///
+    /// Call sites: any place that mutates `base_view` (or that observes the
+    /// active `ConversationView`'s active sub-view changing). Resets the
+    /// captured list before installing — if `server_view` has no active root
+    /// thread yet, the subscription is dropped and history stays empty.
+    fn install_prompt_history_subscription(
+        &mut self,
+        server_view: &Entity<ConversationView>,
+        cx: &mut Context<Self>,
+    ) {
+        self.prompt_history.reset();
+        let Some(thread) = server_view.read(cx).root_thread(cx) else {
+            self._prompt_history_subscription = None;
+            cx.notify();
+            return;
+        };
+
+        let preview_max_chars = AgentSettings::get_global(cx).prompt_history_preview_max_chars;
+
+        // Bootstrap from any entries that already exist (loaded thread).
+        self.prompt_history.bootstrap_from_entries(
+            thread.read(cx).entries(),
+            preview_max_chars,
+            cx,
+        );
+
+        self._prompt_history_subscription = Some(cx.subscribe(
+            &thread,
+            move |this, thread, event: &acp_thread::AcpThreadEvent, cx| match event {
+                acp_thread::AcpThreadEvent::NewEntry => {
+                    // Re-read the setting on every event so a settings change
+                    // takes effect on the next captured prompt without
+                    // re-subscribing.
+                    let preview_max_chars =
+                        AgentSettings::get_global(cx).prompt_history_preview_max_chars;
+                    let entries = thread.read(cx).entries();
+                    this.prompt_history
+                        .capture_if_user_message(entries, preview_max_chars, cx);
+                    cx.notify();
+                }
+                acp_thread::AcpThreadEvent::EntriesRemoved(range) => {
+                    this.prompt_history.handle_removal(range);
+                    cx.notify();
+                }
+                _ => {}
+            },
+        ));
+        cx.notify();
     }
 
     fn migrate_agent_server_from_extensions(&mut self, id: Arc<str>, cx: &mut Context<Self>) {
@@ -5811,6 +5875,55 @@ impl AgentPanel {
             })
     }
 
+    /// Renders the toolbar button that toggles the user-prompt-history popover.
+    ///
+    /// Stage 3: the click handler on each row scrolls the chat list to the
+    /// matching `entry_index`. We snapshot the active root thread's
+    /// `ListState` here (cheap `Rc` clone) so the menu builder closure can
+    /// hand it to each row without holding a back-pointer to `Self`.
+    ///
+    /// The popover row width is hard-clamped via `row_max_width` (see
+    /// `agent.prompt_history_preview_max_chars` setting + the `max_w` guard in
+    /// `prompt_history::build_prompt_history_menu`) so widely-rendered glyphs
+    /// (CJK, emoji) can't burst the panel — char-count truncation alone is
+    /// not enough for variable-width scripts.
+    fn render_prompt_history_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let entries: Vec<crate::prompt_history::PromptHistoryEntry> =
+            self.prompt_history.entries().to_vec();
+
+        let list_state: Option<gpui::ListState> = match &self.base_view {
+            BaseView::AgentThread { conversation_view } => {
+                let cv = conversation_view.read(cx);
+                cv.root_thread_view()
+                    .map(|tv| tv.read(cx).list_state.clone())
+            }
+            BaseView::Terminal { .. } | BaseView::Uninitialized => None,
+        };
+
+        // Width budget for each popover row. Chosen to comfortably fit the
+        // panel even at MIN_PANEL_WIDTH (300px) without overflowing into the
+        // editor area; the in-row Label::truncate() ellipses anything wider.
+        let row_max_width = px(280.);
+
+        PopoverMenu::new("prompt-history-menu")
+            .trigger_with_tooltip(
+                IconButton::new("prompt-history-menu", IconName::HistoryRerun)
+                    .icon_size(IconSize::Small),
+                |_window, cx| Tooltip::simple("Prompt History", cx),
+            )
+            .anchor(Anchor::TopRight)
+            .with_handle(self.prompt_history_menu_handle.clone())
+            .menu(move |window, cx| {
+                Some(crate::prompt_history::build_prompt_history_menu(
+                    &entries,
+                    list_state.clone(),
+                    row_max_width,
+                    window,
+                    cx,
+                ))
+            })
+    }
+
     fn render_no_project_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let focus_handle = self.focus_handle(cx);
 
@@ -6282,6 +6395,7 @@ impl AgentPanel {
                         .pl_1()
                         .pr_1()
                         .when(can_create_entries, |this| this.child(new_thread_menu))
+                        .child(self.render_prompt_history_button(cx))
                         .child(full_screen_button)
                         .child(self.render_panel_options_menu(window, cx)),
                 )

@@ -194,6 +194,11 @@ pub struct AgentSettingsContent {
     ///
     /// Default: 4
     pub message_editor_min_lines: Option<usize>,
+    /// Maximum number of characters shown in each row of the agent panel's
+    /// prompt history dropdown before truncating with an ellipsis.
+    ///
+    /// Default: 32
+    pub prompt_history_preview_max_chars: Option<usize>,
     /// Whether to show turn statistics (elapsed time during generation, final turn duration).
     ///
     /// Default: false

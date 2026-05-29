@@ -1202,6 +1202,13 @@
     //
     // Default: 4
     "message_editor_min_lines": 4,
+    // Maximum characters per row in the agent panel's prompt history
+    // dropdown before truncating with an ellipsis. Renders alongside an
+    // h_flex max_w guard, so widely-rendered glyphs (CJK, emoji) are also
+    // visually clamped.
+    //
+    // Default: 32
+    "prompt_history_preview_max_chars": 32,
     // Whether to show turn statistics (elapsed time during generation, final turn duration).
     //
     // Default: false
