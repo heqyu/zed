@@ -1,0 +1,20 @@
+crates/agent_ui/src/prompt_history.rs
+  s_8da84fb01e6e78::t_8995f7e238bdc9 152-153,159-162,165,169-191
+  s_8da84fb01e6e78::t_e520299f74c80e 22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7c15a6a037c8dc6a3d0068d6628f94c640252ee9",
+  "prompts": {},
+  "sessions": {
+    "s_8da84fb01e6e78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f607eaa4-82fc-4c0e-8906-5e4b422680d3",
+        "model": "claude-4.7-opus"
+      },
+      "human_author": "miraclerhe <miraclerhe@tencent.com>"
+    }
+  }
+}
