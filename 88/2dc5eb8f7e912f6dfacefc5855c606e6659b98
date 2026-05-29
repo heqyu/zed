@@ -1,0 +1,33 @@
+crates/settings_content/src/agent.rs
+  s_8da84fb01e6e78::t_6af6d70ab07f35 194-198
+crates/agent_ui/src/agent_panel.rs
+  s_8da84fb01e6e78::t_34761324b1f2cd 5174-5179,5193-5197,5210
+  s_8da84fb01e6e78::t_d623efb1209bc5 4081-4082,4084-4088,4092,4094-4098,4100-4101
+assets/settings/default.json
+  s_8da84fb01e6e78::t_e61a033c387ee4 1209-1215
+crates/agent_ui/src/prompt_history.rs
+  s_8da84fb01e6e78::t_84c08d076181a2 264-266,269,275-278
+  s_8da84fb01e6e78::t_db6a7aaeba0df4 21
+  s_8da84fb01e6e78::t_07d734f38d1b76 75-80,84-85,100-105,112-113
+  s_8da84fb01e6e78::t_3902c5b58f6a24 185-190,194
+  s_8da84fb01e6e78::t_1d19c18cb775a8 145-150,153,167-168
+crates/agent_settings/src/agent_settings.rs
+  s_8da84fb01e6e78::t_4b45d761960d4a 675-677
+  s_8da84fb01e6e78::t_f87fe336b09725 170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "882dc5eb8f7e912f6dfacefc5855c606e6659b98",
+  "prompts": {},
+  "sessions": {
+    "s_8da84fb01e6e78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f607eaa4-82fc-4c0e-8906-5e4b422680d3",
+        "model": "claude-4.7-opus"
+      },
+      "human_author": "miraclerhe <miraclerhe@tencent.com>"
+    }
+  }
+}
