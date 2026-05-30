@@ -1,0 +1,24 @@
+crates/editor/src/editor_view_mode_memory.rs
+  s_8da84fb01e6e78::t_1924e0df1612b9 1-15,17-49,57-58,60-64,66-69,71-73,75-76
+  s_8da84fb01e6e78::t_aa578de70ae6f8 16,50-56,59,65,70,74
+crates/editor/src/editor.rs
+  s_8da84fb01e6e78::t_2383006ddb85b2 1662-1664,1667,1672-1682
+  s_8da84fb01e6e78::t_d6107113820273 5630-5633,5641-5653
+  s_8da84fb01e6e78::t_75c6dabe2750ec 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "0016092e83eb9fb4735311ad0a624126d80cfbf5",
+  "prompts": {},
+  "sessions": {
+    "s_8da84fb01e6e78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f607eaa4-82fc-4c0e-8906-5e4b422680d3",
+        "model": "claude-4.7-opus"
+      },
+      "human_author": "miraclerhe <miraclerhe@tencent.com>"
+    }
+  }
+}
