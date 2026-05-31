@@ -134,6 +134,15 @@ pub struct EditorSettingsContent {
     /// Default: false
     pub redact_private_values: Option<bool>,
 
+    /// When opening a file, default the editor to read-only mode. Users can
+    /// flip an editor into edit mode via the toolbar toggle button or the
+    /// `editor::ToggleEditorReadOnly` action. This only blocks user input
+    /// from inside the editor — AI agent edits, external editor changes, and
+    /// LSP-driven edits all bypass this flag and apply normally.
+    ///
+    /// Default: true
+    pub default_read_only_on_open: Option<bool>,
+
     /// How many lines to expand the multibuffer excerpts by default
     ///
     /// Default: 3

@@ -135,6 +135,17 @@ impl MarkdownPreviewView {
                 cx.notify();
             }
         });
+
+        workspace.register_action(move |workspace, _: &crate::ToggleMarkdownSourceMode, window, cx| {
+            crate::toggle_markdown_source_mode(workspace, window, cx);
+        });
+    }
+
+    /// Public accessor for the underlying source [`Editor`] of this preview.
+    /// Used by the stage-4 toggle action to recover the editor when swapping
+    /// the pane item back to source mode.
+    pub fn source_editor(&self) -> Option<Entity<Editor>> {
+        self.active_editor.as_ref().map(|state| state.editor.clone())
     }
 
     fn find_existing_independent_preview_item_idx(
@@ -957,6 +968,28 @@ impl Item for MarkdownPreviewView {
 
     fn buffer_kind(&self, _cx: &App) -> ItemBufferKind {
         ItemBufferKind::Singleton
+    }
+
+    /// Expose the underlying source-editor's buffers as project items so that
+    /// `Pane::open_item` can deduplicate by `project_entry_id`.
+    ///
+    /// Without this override, the trait's default impl is a no-op, which
+    /// makes `project_entry_ids()` return an empty SmallVec — causing every
+    /// re-open of the same `.md` file to spawn a fresh `Preview Foo.md` tab
+    /// and even allowing source + preview tabs of the same file to coexist.
+    fn for_each_project_item(
+        &self,
+        cx: &App,
+        f: &mut dyn FnMut(gpui::EntityId, &dyn project::ProjectItem),
+    ) {
+        if let Some(state) = self.active_editor.as_ref() {
+            state
+                .editor
+                .read(cx)
+                .buffer()
+                .read(cx)
+                .for_each_buffer(&mut |buffer| f(buffer.entity_id(), buffer.read(cx)));
+        }
     }
 
     fn as_searchable(

@@ -899,6 +899,13 @@ impl Pane {
         &mut self.nav_history
     }
 
+    /// Weak handle to the workspace this pane belongs to. Public so external
+    /// crates that need a `Context<Workspace>` (e.g. for constructing
+    /// preview views during a custom file-open path) can `update` against it.
+    pub fn workspace(&self) -> &WeakEntity<Workspace> {
+        &self.workspace
+    }
+
     pub fn fork_nav_history(&self) -> NavHistory {
         let history = self.nav_history.0.lock().clone();
         NavHistory(Arc::new(Mutex::new(history)))
@@ -1340,6 +1347,37 @@ impl Pane {
         }
 
         cx.emit(Event::AddItem { item });
+    }
+
+    /// Replace the item at `index` with `new_item` in place, preserving tab
+    /// position and bypassing the `project_entry_id` deduplication that
+    /// [`Self::add_item`] applies.
+    ///
+    /// This is the right primitive for view-shape swaps where two
+    /// [`ItemHandle`]s wrap the same underlying buffer (e.g. markdown
+    /// preview ↔ source editor). `add_item` would see them as duplicates of
+    /// the active item and discard the new one; `close_item_by_id` would
+    /// then remove the old one, leaving the tab empty.
+    ///
+    /// The old item is dropped — subscriptions are released via `Drop`.
+    /// `nav_history` and other long-lived per-pane state is kept untouched
+    /// because both items address the same project entry.
+    pub fn replace_item_at(
+        &mut self,
+        index: usize,
+        new_item: Box<dyn ItemHandle>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if index >= self.items.len() {
+            return;
+        }
+        self.items[index] = new_item.clone();
+        if self.active_item_index == index {
+            self.activate_item(index, true, true, window, cx);
+        }
+        cx.emit(Event::AddItem { item: new_item });
+        cx.notify();
     }
 
     pub fn add_item(

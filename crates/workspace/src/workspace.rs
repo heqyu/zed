@@ -810,7 +810,7 @@ pub fn init(app_state: Arc<AppState>, cx: &mut App) {
 type BuildProjectItemFn =
     fn(AnyEntity, Entity<Project>, Option<&Pane>, &mut Window, &mut App) -> Box<dyn ItemHandle>;
 
-type BuildProjectItemForPathFn =
+pub type BuildProjectItemForPathFn =
     fn(
         &Entity<Project>,
         &ProjectPath,
@@ -935,7 +935,7 @@ impl ProjectItemRegistry {
     }
 }
 
-type WorkspaceItemBuilder =
+pub type WorkspaceItemBuilder =
     Box<dyn FnOnce(&mut Pane, &mut Window, &mut Context<Pane>) -> Box<dyn ItemHandle>>;
 
 impl Global for ProjectItemRegistry {}
@@ -945,6 +945,24 @@ impl Global for ProjectItemRegistry {}
 /// was added last.
 pub fn register_project_item<I: ProjectItem>(cx: &mut App) {
     cx.default_global::<ProjectItemRegistry>().register::<I>();
+}
+
+/// Registers a custom path-based opener directly. The opener is given the
+/// project, project_path, window and app, and returns either:
+///   * `None`  — the opener does not want to handle this path; the next
+///     opener (registered earlier) will be tried.
+///   * `Some(task)` — the opener will produce a workspace item asynchronously.
+///
+/// Used by features that want to override the default `Editor` opener for
+/// specific file types (e.g. opening `.md` files as a markdown preview view
+/// when the `editor.default_read_only_on_open` setting is on). Because
+/// `open_path` iterates registrations in reverse insertion order, calling
+/// this function from a feature's `init` after `register_project_item::<Editor>`
+/// guarantees the custom opener gets first dibs.
+pub fn register_default_view_for_path(cx: &mut App, opener: BuildProjectItemForPathFn) {
+    cx.default_global::<ProjectItemRegistry>()
+        .build_project_item_for_path_fns
+        .push(opener);
 }
 
 #[derive(Default)]

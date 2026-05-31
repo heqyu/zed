@@ -6,7 +6,7 @@ use editor::actions::{
     AddSelectionAbove, AddSelectionBelow, CodeActionSource, DuplicateLineDown, GoToDiagnostic,
     GoToHunk, GoToPreviousDiagnostic, GoToPreviousHunk, MoveLineDown, MoveLineUp, SelectAll,
     SelectLargerSyntaxNode, SelectNext, SelectSmallerSyntaxNode, ToggleCodeActions,
-    ToggleDiagnostics, ToggleGoToLine, ToggleInlineDiagnostics,
+    ToggleDiagnostics, ToggleEditorReadOnly, ToggleGoToLine, ToggleInlineDiagnostics,
 };
 use editor::code_context_menus::{CodeContextMenu, ContextMenuOrigin};
 use editor::{Editor, EditorSettings};
@@ -84,6 +84,17 @@ impl QuickActionBar {
             .and_then(|item| item.downcast::<Editor>())
     }
 
+    /// Active item, if it's a markdown preview. Stage-4 of the read-only
+    /// feature uses this to surface the source/preview toggle button on
+    /// preview tabs.
+    fn active_md_preview(
+        &self,
+    ) -> Option<Entity<markdown_preview::markdown_preview_view::MarkdownPreviewView>> {
+        self.active_item.as_ref().and_then(|item| {
+            item.downcast::<markdown_preview::markdown_preview_view::MarkdownPreviewView>()
+        })
+    }
+
     fn apply_settings(&mut self, cx: &mut Context<Self>) {
         let new_show = EditorSettings::get_global(cx).toolbar.quick_actions;
         if new_show != self.show {
@@ -95,7 +106,7 @@ impl QuickActionBar {
     }
 
     fn get_toolbar_item_location(&self) -> ToolbarItemLocation {
-        if self.show && self.active_editor().is_some() {
+        if self.show && (self.active_editor().is_some() || self.active_md_preview().is_some()) {
             ToolbarItemLocation::PrimaryRight
         } else {
             ToolbarItemLocation::Hidden
@@ -105,6 +116,32 @@ impl QuickActionBar {
 
 impl Render for QuickActionBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Stage-4 fast path: active item is a MarkdownPreviewView. Render
+        // only the source/preview toggle button — the rest of the bar's
+        // controls (search, code actions, …) are Editor-specific and would
+        // panic or render nothing useful here.
+        if let Some(_preview) = self.active_md_preview() {
+            let workspace = self.workspace.clone();
+            return h_flex()
+                .id("quick action bar (md preview)")
+                .gap(DynamicSpacing::Base01.rems(cx))
+                .child(
+                    IconButton::new("toggle md preview to source", IconName::Pencil)
+                        .icon_size(IconSize::Small)
+                        .style(ButtonStyle::Subtle)
+                        .tooltip(|_window, cx| Tooltip::simple("Switch to Source", cx))
+                        .on_click(move |_event, window, cx| {
+                            if let Some(workspace) = workspace.upgrade() {
+                                workspace.update(cx, |workspace, cx| {
+                                    markdown_preview::toggle_markdown_source_mode(
+                                        workspace, window, cx,
+                                    );
+                                });
+                            }
+                        }),
+                );
+        }
+
         let Some(editor) = self.active_editor() else {
             return div().id("empty quick action bar");
         };
@@ -168,6 +205,84 @@ impl Render for QuickActionBar {
                 window.dispatch_action(Box::new(InlineAssist::default()), cx);
             },
         );
+
+        // Read-only toggle button (Stage 1 + Stage 4).
+        //
+        // Only shown for full-mode single-buffer editors with a backing file —
+        // matches the same gate that `Editor::for_buffer` uses to apply the
+        // default-read-only setting. Multibuffers (search results, agent
+        // diff), minimaps, and untitled scratch buffers don't get the
+        // toolbar button.
+        //
+        // Behaviour split (stage 4):
+        //   * Markdown source editor → button switches back to rendered
+        //     preview via `markdown::ToggleMarkdownSourceMode`.
+        //   * Anything else (full singleton non-md editor) → button flips
+        //     the editor-level read_only flag via `editor::ToggleEditorReadOnly`.
+        let is_md_source = editor_value
+            .buffer()
+            .read(cx)
+            .as_singleton()
+            .and_then(|b| b.read(cx).language().map(|l| l.name().to_string()))
+            .is_some_and(|name| name == "Markdown");
+        let read_only_toggle_button = (is_full
+            && editor.buffer_kind(cx) == ItemBufferKind::Singleton
+            && editor_value
+                .buffer()
+                .read(cx)
+                .as_singleton()
+                .and_then(|b| b.read(cx).file().cloned())
+                .is_some())
+        .then(|| {
+            let is_read_only = editor_value.is_editor_read_only();
+            QuickActionBarButton::new(
+                "toggle editor read only",
+                if is_md_source {
+                    ui::IconName::Eye
+                } else if is_read_only {
+                    IconName::FileLock
+                } else {
+                    IconName::Pencil
+                },
+                is_read_only,
+                if is_md_source {
+                    Box::new(markdown_preview::ToggleMarkdownSourceMode) as Box<dyn Action>
+                } else {
+                    Box::new(ToggleEditorReadOnly) as Box<dyn Action>
+                },
+                editor.read(cx).focus_handle(cx),
+                if is_md_source {
+                    "Switch to Rendered Preview"
+                } else if is_read_only {
+                    "Switch to Edit Mode"
+                } else {
+                    "Switch to Read-Only Mode"
+                },
+                {
+                    let editor = editor.clone();
+                    let workspace = self.workspace.clone();
+                    move |_, window, cx| {
+                        if is_md_source {
+                            if let Some(workspace) = workspace.upgrade() {
+                                workspace.update(cx, |workspace, cx| {
+                                    markdown_preview::toggle_markdown_source_mode(
+                                        workspace, window, cx,
+                                    );
+                                });
+                            }
+                        } else {
+                            editor.update(cx, |editor, cx| {
+                                editor.toggle_editor_read_only(
+                                    &ToggleEditorReadOnly,
+                                    window,
+                                    cx,
+                                );
+                            });
+                        }
+                    }
+                },
+            )
+        });
 
         let code_actions_dropdown = code_action_enabled.then(|| {
             let is_deployed = {
@@ -679,6 +794,7 @@ impl Render for QuickActionBar {
             .children(self.render_repl_menu(cx))
             .children(self.render_preview_button(self.workspace.clone(), cx))
             .children(search_button)
+            .children(read_only_toggle_button)
             .when(
                 AgentSettings::get_global(cx).enabled(cx) && AgentSettings::get_global(cx).button,
                 |bar| bar.child(assistant_button),

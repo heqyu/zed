@@ -507,6 +507,7 @@ impl EditorElement {
         register_action(editor, window, Editor::enable_breakpoint);
         register_action(editor, window, Editor::disable_breakpoint);
         register_action(editor, window, Editor::toggle_read_only);
+        register_action(editor, window, Editor::toggle_editor_read_only);
         register_action(editor, window, Editor::reload_file);
 
         if !editor.read(cx).read_only(cx) {

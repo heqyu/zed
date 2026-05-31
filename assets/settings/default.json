@@ -401,6 +401,14 @@
   "wrap_guides": [],
   // Hide the values of in variables from visual display in private files
   "redact_private_values": false,
+  // When opening a file, default the editor to read-only mode. Users can
+  // flip an editor into edit mode via the toolbar toggle button or the
+  // `editor::ToggleEditorReadOnly` action. Only blocks user input from
+  // inside the editor — AI agent edits, external editor changes, and
+  // LSP-driven edits all bypass this flag.
+  //
+  // Default: true
+  "default_read_only_on_open": true,
   // The default number of lines to expand excerpts in the multibuffer by.
   "expand_excerpt_lines": 5,
   // The default number of context lines shown in multibuffer excerpts.

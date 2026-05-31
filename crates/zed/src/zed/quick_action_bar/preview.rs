@@ -2,12 +2,14 @@ use csv_preview::{
     CsvPreviewView, OpenPreview as CsvOpenPreview, OpenPreviewToTheSide as CsvOpenPreviewToTheSide,
     TabularDataPreviewFeatureFlag,
 };
+use editor::EditorSettings;
 use feature_flags::FeatureFlagAppExt as _;
 use gpui::{AnyElement, Modifiers, WeakEntity};
 use markdown_preview::{
     OpenPreview as MarkdownOpenPreview, OpenPreviewToTheSide as MarkdownOpenPreviewToTheSide,
     markdown_preview_view::MarkdownPreviewView,
 };
+use settings::Settings as _;
 use svg_preview::{
     OpenPreview as SvgOpenPreview, OpenPreviewToTheSide as SvgOpenPreviewToTheSide,
     svg_preview_view::SvgPreviewView,
@@ -32,10 +34,21 @@ impl QuickActionBar {
     ) -> Option<AnyElement> {
         let mut preview_type = None;
 
+        // When default_read_only_on_open is on, opening a .md file already
+        // produces a MarkdownPreviewView, and the toolbar's read-only
+        // toggle button (👁) handles preview ↔ source swap. The legacy
+        // "Preview Markdown" eye button (which opens an additional
+        // preview pane) is redundant and visually indistinct from the
+        // toggle, so we suppress just the Markdown branch in that mode.
+        // SVG and CSV previews are untouched — they have no toggle
+        // equivalent yet.
+        let suppress_markdown = EditorSettings::get_global(cx).default_read_only_on_open;
+
         if let Some(workspace) = self.workspace.upgrade() {
             workspace.update(cx, |workspace, cx| {
-                if MarkdownPreviewView::resolve_active_item_as_markdown_editor(workspace, cx)
-                    .is_some()
+                if !suppress_markdown
+                    && MarkdownPreviewView::resolve_active_item_as_markdown_editor(workspace, cx)
+                        .is_some()
                 {
                     preview_type = Some(PreviewType::Markdown);
                 } else if SvgPreviewView::resolve_active_item_as_svg_buffer(workspace, cx).is_some()

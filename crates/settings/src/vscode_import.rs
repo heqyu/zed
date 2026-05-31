@@ -288,6 +288,7 @@ impl VsCodeSettings {
                 _ => None,
             }),
             redact_private_values: None,
+            default_read_only_on_open: None,
             relative_line_numbers: self.read_enum("editor.lineNumbers", |s| match s {
                 "relative" => Some(RelativeLineNumbers::Enabled),
                 _ => None,

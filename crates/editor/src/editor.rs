@@ -21,6 +21,7 @@ pub mod display_map;
 mod document_colors;
 mod document_links;
 mod document_symbols;
+pub mod editor_view_mode_memory;
 mod editor_settings;
 mod element;
 mod fold;
@@ -1680,8 +1681,46 @@ impl Editor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let buffer = cx.new(|cx| MultiBuffer::singleton(buffer, cx));
-        Self::new(EditorMode::full(), buffer, project, window, cx)
+        let multi_buffer = cx.new(|cx| MultiBuffer::singleton(buffer.clone(), cx));
+        let mut editor = Self::new(EditorMode::full(), multi_buffer, project, window, cx);
+
+        // Apply the editor.default_read_only_on_open setting at file-open time.
+        //
+        // Notes:
+        //   * This sets the editor-level `read_only` flag, not the buffer's
+        //     Capability. That means agent edits, LSP edits, external editor
+        //     changes, and any other code path that goes through Buffer::edit
+        //     are NOT blocked — only user input handlers that gate on
+        //     `Editor::read_only(cx)` are.
+        //   * Untitled buffers (no backing file) skip the default — there's no
+        //     reason to make a fresh scratch read-only.
+        //   * Markdown buffers also skip here; stage 3 routes them through
+        //     MarkdownPreviewView instead, which is its own kind of read-only.
+        //   * If the user previously toggled this file in the current session,
+        //     EditorViewModeMemory wins over the global default — that's the
+        //     stage-2 session-level memory.
+        if EditorSettings::get_global(cx).default_read_only_on_open {
+            let buffer_ref = buffer.read(cx);
+            let path = buffer_ref.file().map(|f| f.path().clone());
+            let is_markdown = buffer_ref
+                .language()
+                .map(|lang| lang.name().as_ref() == "Markdown")
+                .unwrap_or(false);
+            if let Some(path) = path
+                && !is_markdown
+            {
+                let remembered = crate::editor_view_mode_memory::EditorViewModeMemory::get(cx, &path);
+                let should_be_read_only = match remembered {
+                    Some(mode) => mode.is_source_read_only(),
+                    None => true,
+                };
+                if should_be_read_only {
+                    editor.set_read_only(true);
+                }
+            }
+        }
+
+        editor
     }
 
     pub fn for_multibuffer(
@@ -3052,6 +3091,15 @@ impl Editor {
 
     pub fn read_only(&self, cx: &App) -> bool {
         self.read_only || self.buffer.read(cx).read_only()
+    }
+
+    /// Returns whether the editor-level `read_only` flag is on, ignoring the
+    /// underlying buffer's Capability. Used by the toolbar toggle button so
+    /// that flipping the toggle changes only this flag and never affects
+    /// the buffer's capability (which is what the agent / external tools
+    /// rely on to be ReadWrite).
+    pub fn is_editor_read_only(&self) -> bool {
+        self.read_only
     }
 
     pub fn set_read_only(&mut self, read_only: bool) {
@@ -5622,6 +5670,37 @@ impl Editor {
                 );
             })
         }
+    }
+
+    /// Toolbar toggle's action handler — flips only `self.read_only` and
+    /// leaves the buffer's `Capability` alone. That keeps AI agent / LSP /
+    /// external editor edit paths unblocked, in contrast to
+    /// [`toggle_read_only`] which flips the buffer's capability.
+    ///
+    /// Also writes the new state to `EditorViewModeMemory` so reopening the
+    /// same file in this session restores the user's choice instead of
+    /// snapping back to the default.
+    pub fn toggle_editor_read_only(
+        &mut self,
+        _: &ToggleEditorReadOnly,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.read_only = !self.read_only;
+        let new_mode = if self.read_only {
+            crate::editor_view_mode_memory::EditorViewMode::SourceReadOnly
+        } else {
+            crate::editor_view_mode_memory::EditorViewMode::SourceEditable
+        };
+        if let Some(path) = self
+            .buffer
+            .read(cx)
+            .as_singleton()
+            .and_then(|b| b.read(cx).file().map(|f| f.path().clone()))
+        {
+            crate::editor_view_mode_memory::EditorViewModeMemory::set(cx, path, new_mode);
+        }
+        cx.notify();
     }
 
     pub fn reload_file(&mut self, _: &ReloadFile, window: &mut Window, cx: &mut Context<Self>) {
