@@ -2300,10 +2300,15 @@ impl GitRepository for RealGitRepository {
                 }
                 let output = git.build_command(&args).envs(env.iter()).output().await?;
 
+                // git puts "CONFLICT (...)" lines on STDOUT during a conflicting
+                // stash pop, with stderr usually empty. Including both lets
+                // upstream callers heuristically detect "conflict vs other
+                // failure" by string-matching `CONFLICT` (see git_ui::pull).
                 anyhow::ensure!(
                     output.status.success(),
-                    "Failed to stash pop:\n{}",
-                    String::from_utf8_lossy(&output.stderr)
+                    "Failed to stash pop:\n{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
                 );
                 Ok(())
             })

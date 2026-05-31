@@ -3033,6 +3033,15 @@ impl GitPanel {
         telemetry::event!("Git Pulled");
         let branch = branch.clone();
         let remote = self.get_remote(false, false, window, cx);
+
+        // Snapshot dirty state up-front. We auto-stash if dirty, run the
+        // pull, then auto-pop. Mirrors `git -c rebase.autostash=true pull`
+        // but works for non-rebase pulls too and surfaces conflict errors
+        // through Zed's toast system instead of leaving the user staring
+        // at "cannot pull with rebase: You have unstaged changes" in the
+        // log panel.
+        let has_changes = repo.read(cx).cached_status().next().is_some();
+
         cx.spawn_in(window, async move |this, cx| {
             let remote = match remote.await {
                 Ok(Some(remote)) => remote,
@@ -3056,18 +3065,75 @@ impl GitPanel {
                 .is_none()
                 .then(|| branch.name().to_owned().into());
 
+            // Auto-stash. If this fails we abort the pull entirely — pulling
+            // on top of a half-stashed worktree would just produce a worse
+            // error.
+            let did_stash = if has_changes {
+                let stash_task = repo.update(cx, |repo, cx| repo.stash_all(cx));
+                match stash_task.await {
+                    Ok(()) => true,
+                    Err(e) => {
+                        log::error!("Auto-stash before pull failed: {:?}", e);
+                        this.update(cx, |this, cx| this.show_error_toast("auto-stash", e, cx))
+                            .ok();
+                        return Ok(());
+                    }
+                }
+            } else {
+                false
+            };
+
             let pull = repo.update(cx, |repo, cx| {
                 repo.pull(branch_name, remote.name.clone(), rebase, askpass, cx)
             });
 
-            let remote_message = pull.await?;
+            let pull_outcome = pull.await;
+
+            // Always pop if we stashed — even on pull failure — so the
+            // working tree never silently loses the user's changes to a
+            // forgotten stash.
+            let pop_outcome = if did_stash {
+                let pop_task = repo.update(cx, |repo, cx| repo.stash_pop(None, cx));
+                Some(pop_task.await)
+            } else {
+                None
+            };
 
             let action = RemoteAction::Pull(remote);
-            this.update(cx, |this, cx| match remote_message {
-                Ok(remote_message) => this.show_remote_output(action, remote_message, cx),
-                Err(e) => {
-                    log::error!("Error while pulling {:?}", e);
-                    this.show_error_toast(action.name(), e, cx)
+            this.update(cx, |this, cx| {
+                match pull_outcome {
+                    Ok(Ok(remote_message)) => {
+                        this.show_remote_output(action.clone(), remote_message, cx)
+                    }
+                    Ok(Err(e)) => {
+                        log::error!("Error while pulling {:?}", e);
+                        this.show_error_toast(action.name(), e, cx);
+                    }
+                    Err(e) => {
+                        log::error!("Error while pulling {:?}", e);
+                        this.show_error_toast(action.name(), e.into(), cx);
+                    }
+                }
+
+                if let Some(Err(pop_err)) = pop_outcome {
+                    let msg = format!("{:#}", pop_err);
+                    // git stash pop puts CONFLICT (...) lines on stdout when
+                    // there are merge conflicts; we surface stdout into the
+                    // anyhow chain in `Repository::stash_pop`, so a simple
+                    // case-insensitive substring match is reliable.
+                    if msg.to_ascii_lowercase().contains("conflict") {
+                        this.show_error_toast(
+                            "stash pop",
+                            anyhow::anyhow!(
+                                "Auto-stash pop has conflicts. Resolve them in the affected files, \
+                                 then `git add` + commit (or run `git stash drop` to discard the stash)."
+                            ),
+                            cx,
+                        );
+                    } else {
+                        log::error!("Stash pop after pull failed: {:?}", pop_err);
+                        this.show_error_toast("stash pop", pop_err, cx);
+                    }
                 }
             })
             .ok();
