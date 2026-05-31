@@ -18,13 +18,15 @@ use crate::completion_provider::AvailableSkill;
 use crate::message_editor::SharedSessionCapabilities;
 
 use db::kvp::KeyValueStore;
+use futures::StreamExt as _;
 use gpui::List;
 use gpui::Stateful;
 use gpui::TaskExt;
 use heapless::Vec as ArrayVec;
 use language_model::{
-    FastModeConfirmation, LanguageModelEffortLevel, LanguageModelId, LanguageModelProviderId,
-    LanguageModelRegistry, Speed,
+    CompletionIntent, ConfiguredModel, FastModeConfirmation, LanguageModelEffortLevel,
+    LanguageModelId, LanguageModelProviderId, LanguageModelRegistry, LanguageModelRequest,
+    LanguageModelRequestMessage, Role, Speed,
 };
 use settings::update_settings_file;
 use ui::{ButtonLike, SpinnerLabel, SpinnerVariant, SplitButton, SplitButtonStyle, Tab};
@@ -625,6 +627,11 @@ pub struct ThreadView {
     /// dropped from this set so a future regression of the same kind would
     /// re-show.
     dismissed_skill_loading_issues: HashSet<SkillLoadingIssue>,
+    /// In-flight task for the "Optimize Prompt" toolbar button. Held so the
+    /// button can render a spinner while the LLM rewrites the user's draft,
+    /// and so a second click while the first one is running becomes a no-op.
+    /// Mirrors `git_panel::generate_commit_message_task`.
+    optimize_prompt_task: Option<Task<()>>,
 }
 impl Focusable for ThreadView {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
@@ -1062,6 +1069,7 @@ impl ThreadView {
             generating_indicator_in_list: false,
             skill_loading_issues: Vec::new(),
             dismissed_skill_loading_issues: HashSet::default(),
+            optimize_prompt_task: None,
         };
 
         this.sync_generating_indicator(cx);
@@ -4032,6 +4040,7 @@ impl ThreadView {
                                 h_flex()
                                     .gap_0p5()
                                     .child(self.render_add_context_button(cx))
+                                    .children(self.render_optimize_prompt_button(cx))
                                     .child(self.render_follow_toggle(cx))
                                     .children(self.render_fast_mode_control(cx))
                                     .children(self.render_thinking_control(cx)),
@@ -4805,6 +4814,323 @@ impl ThreadView {
                 y: px(-2.0),
             })
             .anchor(gpui::Anchor::BottomLeft)
+    }
+
+    /// Rewrite the user's draft prompt in the message editor using an LLM.
+    ///
+    /// MVP behavior:
+    ///   1. Read current text. Bail if empty / whitespace-only.
+    ///   2. Resolve a model via `LanguageModelRegistry::inline_assistant_model`
+    ///      (which falls back to `default_model` when not set). This mirrors
+    ///      the model-pick policy used for inline edits — semantically the
+    ///      closest existing analog.
+    ///   3. Send a single LLM request: a system message loaded at compile
+    ///      time from `optimize_prompt.txt`, followed by the user's draft.
+    ///   4. Accumulate the streamed response into a String, then `set_text`
+    ///      it onto the editor in one shot. Streaming token-by-token into
+    ///      the input box is tempting visually but interferes with mention
+    ///      folds, completions, and snapshot stability.
+    ///   5. On error: log + restore the original draft, do not show a
+    ///      spurious toast — the user can just click again.
+    ///   6. On second click while a task is in-flight: no-op.
+    pub fn optimize_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.optimize_prompt_task.is_some() {
+            return;
+        }
+        if !AgentSettings::get_global(cx).enabled(cx) {
+            return;
+        }
+
+        let original = self.message_editor.read(cx).text(cx);
+        if original.trim().is_empty() {
+            return;
+        }
+
+        let Some(ConfiguredModel { provider, model }) =
+            LanguageModelRegistry::read_global(cx).inline_assistant_model()
+        else {
+            log::info!("optimize_prompt: no model configured");
+            return;
+        };
+
+        const SYSTEM_PROMPT: &str = include_str!("../optimize_prompt.txt");
+
+        // Wrap the draft in XML-style delimiters so the model treats it as
+        // data rather than as an imperative for itself. Without this, drafts
+        // like "帮我写个排序算法" cause models to actually write a sorting
+        // algorithm instead of rewriting the prompt that asks for one.
+        let user_message = format!("<draft>\n{original}\n</draft>");
+
+        // Dump the fully-assembled prompt to the log so it can be inspected
+        // verbatim — handy when tuning the system prompt.
+        log::info!(
+            "[optimize_prompt] using model: {provider} / {model}\n\
+             ===== SYSTEM =====\n{system}\n\
+             ===== USER =====\n{user}\n\
+             ===== END =====",
+            provider = provider.id().0,
+            model = model.id().0,
+            system = SYSTEM_PROMPT,
+            user = user_message,
+        );
+
+        let request = LanguageModelRequest {
+            thread_id: None,
+            prompt_id: None,
+            intent: Some(CompletionIntent::InlineAssist),
+            messages: vec![
+                LanguageModelRequestMessage {
+                    role: Role::System,
+                    content: vec![SYSTEM_PROMPT.to_string().into()],
+                    cache: false,
+                    reasoning_details: None,
+                },
+                LanguageModelRequestMessage {
+                    role: Role::User,
+                    content: vec![user_message.into()],
+                    cache: false,
+                    reasoning_details: None,
+                },
+            ],
+            tools: Vec::new(),
+            tool_choice: None,
+            stop: Vec::new(),
+            temperature: None,
+            thinking_allowed: false,
+            thinking_effort: None,
+            speed: None,
+        };
+
+        let editor = self.message_editor.clone();
+
+        self.optimize_prompt_task = Some(cx.spawn_in(window, async move |this, cx| {
+            // Authenticate the provider on first use, mirroring git_panel.
+            if let Ok(task) = cx.update(|_, cx| {
+                if !provider.is_authenticated(cx) {
+                    Some(provider.authenticate(cx))
+                } else {
+                    None
+                }
+            }) {
+                if let Some(task) = task {
+                    let _ = task.await;
+                }
+            }
+
+            let stream = model.stream_completion_text(request, &cx);
+
+            match stream.await {
+                Ok(mut messages) => {
+                    let mut accumulated = String::new();
+                    let mut had_error = false;
+                    while let Some(chunk) = messages.stream.next().await {
+                        match chunk {
+                            Ok(text) => accumulated.push_str(&text),
+                            Err(err) => {
+                                log::error!("optimize_prompt: stream error: {:?}", err);
+                                had_error = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    let final_text = if had_error || accumulated.trim().is_empty() {
+                        // Don't clobber the user's draft with a half-baked
+                        // response — leave the original in place.
+                        let _ = this.update(cx, |this, _| {
+                            this.optimize_prompt_task = None;
+                        });
+                        return;
+                    } else {
+                        // Structural extraction: the host enforces a
+                        // <analysis>...</analysis><rewritten>...</rewritten>
+                        // schema. We only consume <rewritten>; <analysis> is
+                        // logged for debugging. If the model ignored the
+                        // schema (smaller models occasionally do), fall back
+                        // to fence-stripping the raw output so the feature
+                        // still works degraded — the worst case is the same
+                        // behavior as before the schema was added.
+                        Self::extract_optimized_text(&accumulated, &original)
+                    };
+
+                    let _ = editor.update_in(cx, |editor, window, cx| {
+                        editor.clear(window, cx);
+                        editor.insert_text(&final_text, window, cx);
+                    });
+                }
+                Err(err) => {
+                    log::error!("optimize_prompt: failed to start stream: {:?}", err);
+                }
+            }
+
+            let _ = this.update(cx, |this, _| {
+                this.optimize_prompt_task = None;
+            });
+        }));
+    }
+
+    /// Pull the rewritten draft out of the model's structured response.
+    ///
+    /// The system prompt enforces this schema:
+    /// ```text
+    /// <analysis>
+    /// language: ...
+    /// intent_type: ...
+    /// ...
+    /// </analysis>
+    /// <rewritten>
+    /// the rewrite
+    /// </rewritten>
+    /// ```
+    ///
+    /// Three-tier extraction with graceful degradation:
+    ///   1. Happy path: parse `<rewritten>...</rewritten>`. Log `<analysis>`
+    ///      to RUST_LOG=info so prompt tuning is observable.
+    ///   2. Length-budget guard: if the rewrite is more than 5x the draft
+    ///      length, it almost certainly drifted into "answer" mode despite
+    ///      the schema. Log a warning, but still return the rewrite — the
+    ///      user can re-click. Being too aggressive here would make the
+    ///      button feel unreliable.
+    ///   3. Fallback: model ignored the schema entirely (some smaller
+    ///      models will). Strip a top-level code fence if present and
+    ///      return the raw text. This is the same behavior we shipped
+    ///      before the schema, so we degrade no worse than before.
+    fn extract_optimized_text(raw: &str, original_draft: &str) -> String {
+        if let Some(rewritten) = Self::extract_xml_block(raw, "rewritten") {
+            if let Some(analysis) = Self::extract_xml_block(raw, "analysis") {
+                log::info!("[optimize_prompt] analysis:\n{}", analysis);
+            }
+
+            // Length-budget tripwire. Conservative threshold so we don't
+            // false-positive on legitimately-expanded structured rewrites
+            // of short drafts.
+            let original_len = original_draft.chars().count().max(1);
+            let rewrite_len = rewritten.chars().count();
+            if rewrite_len > original_len * 5 && rewrite_len > 200 {
+                log::warn!(
+                    "[optimize_prompt] rewrite is {}x the draft length \
+                     ({} → {} chars) — model may have drifted into \
+                     answer mode despite the output schema",
+                    rewrite_len / original_len,
+                    original_len,
+                    rewrite_len,
+                );
+            }
+            return rewritten;
+        }
+
+        log::warn!(
+            "[optimize_prompt] model did not honor <rewritten> schema; \
+             falling back to fence-strip on raw output"
+        );
+        Self::unwrap_top_level_fence(raw)
+    }
+
+    /// Extract the contents of `<tag>...</tag>` from `text`, trimming
+    /// surrounding whitespace. Returns `None` if either delimiter is
+    /// missing. Lazy-matches the inner span — ignores nested same-name
+    /// tags, which the schema doesn't produce.
+    fn extract_xml_block(text: &str, tag: &str) -> Option<String> {
+        let open = format!("<{tag}>");
+        let close = format!("</{tag}>");
+        let start = text.find(&open)? + open.len();
+        let end_relative = text[start..].find(&close)?;
+        Some(text[start..start + end_relative].trim().to_owned())
+    }
+
+    /// Fallback path used only when the model ignored the structured
+    /// output schema. Strips a single leading triple-backtick fence
+    /// (` ```lang\n...\n``` `) when it spans the entire response;
+    /// otherwise returns the input unchanged.
+    fn unwrap_top_level_fence(text: &str) -> String {
+        let trimmed = text.trim();
+        if !trimmed.starts_with("```") || !trimmed.ends_with("```") {
+            return text.to_owned();
+        }
+        // Find the end of the opening fence's first line.
+        let after_open = match trimmed.find('\n') {
+            Some(i) => &trimmed[i + 1..],
+            None => return text.to_owned(),
+        };
+        let inner = match after_open.rfind("```") {
+            Some(i) => after_open[..i].trim_end_matches('\n'),
+            None => return text.to_owned(),
+        };
+        inner.to_owned()
+    }
+
+    /// Render the "Optimize Prompt" toolbar button — sits between the
+    /// add-context (+) button and the follow-toggle on the bottom-left of
+    /// the message editor. Mirrors the structure of git_panel's commit
+    /// message generator button.
+    ///
+    /// States:
+    ///   - Agent disabled (AgentSettings::enabled = false): button hidden.
+    ///   - Optimization in flight: rendered as a Stop button + small
+    ///     "Optimizing…" label so the user can cancel by clicking again.
+    ///   - No inline_assistant_model / default_model configured:
+    ///     rendered disabled with a tooltip pointing the user at
+    ///     settings.
+    ///   - Editor empty: rendered disabled.
+    ///   - Otherwise: AiEdit icon, click triggers `optimize_prompt`.
+    fn render_optimize_prompt_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !AgentSettings::get_global(cx).enabled(cx) {
+            return None;
+        }
+
+        if self.optimize_prompt_task.is_some() {
+            return Some(
+                h_flex()
+                    .gap_1()
+                    .child(
+                        IconButton::new("cancel-optimize-prompt", IconName::Stop)
+                            .icon_color(Color::Error)
+                            .icon_size(IconSize::Small)
+                            .style(ButtonStyle::Tinted(TintColor::Error))
+                            .tooltip(Tooltip::text("Cancel Prompt Optimization"))
+                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                this.optimize_prompt_task.take();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Label::new("Optimizing…")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .into_any_element(),
+            );
+        }
+
+        let model_registry = LanguageModelRegistry::read_global(cx);
+        let no_model = model_registry.inline_assistant_model().is_none();
+        let editor_empty = self.message_editor.read(cx).is_empty(cx);
+        let disabled = no_model || editor_empty;
+
+        Some(
+            IconButton::new("optimize-prompt", IconName::AiEdit)
+                .shape(ui::IconButtonShape::Square)
+                .icon_size(IconSize::Small)
+                .icon_color(if disabled {
+                    Color::Disabled
+                } else {
+                    Color::Muted
+                })
+                .tooltip(move |_window, cx| {
+                    if no_model {
+                        Tooltip::simple("Configure an LLM provider to optimize prompts", cx)
+                    } else if editor_empty {
+                        Tooltip::simple("Type something first to optimize", cx)
+                    } else {
+                        Tooltip::simple("Optimize Prompt", cx)
+                    }
+                })
+                .disabled(disabled)
+                .on_click(cx.listener(|this, _event, window, cx| {
+                    this.optimize_prompt(window, cx);
+                }))
+                .into_any_element(),
+        )
     }
 
     fn render_send_button(&self, cx: &mut Context<Self>) -> AnyElement {

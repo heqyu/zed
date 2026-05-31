@@ -2767,6 +2767,17 @@ impl GitPanel {
                     &diff_text,
                 );
 
+                // Dump the fully-assembled commit-message prompt so it can be
+                // inspected verbatim — handy when tuning rules / project
+                // overrides.
+                log::info!(
+                    "[generate_commit_message] using model: {provider} / {model}\n\
+                     ===== USER (single message) =====\n{content}\n\
+                     ===== END =====",
+                    provider = provider.id().0,
+                    model = model.id().0,
+                );
+
                 let request = LanguageModelRequest {
                     thread_id: None,
                     prompt_id: None,
