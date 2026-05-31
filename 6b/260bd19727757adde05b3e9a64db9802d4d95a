@@ -1,0 +1,20 @@
+crates/agent_ui/src/conversation_view/thread_view.rs
+  s_8da84fb01e6e78::t_4fbb48397dd7c1 4732-4805
+  s_8da84fb01e6e78::t_295fab9c04e18c 3800
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "6b260bd19727757adde05b3e9a64db9802d4d95a",
+  "prompts": {},
+  "sessions": {
+    "s_8da84fb01e6e78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f607eaa4-82fc-4c0e-8906-5e4b422680d3",
+        "model": "claude-4.7-opus"
+      },
+      "human_author": "miraclerhe <miraclerhe@tencent.com>"
+    }
+  }
+}
