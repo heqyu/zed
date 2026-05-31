@@ -1,0 +1,29 @@
+crates/zed/src/zed/quick_action_bar.rs
+  s_8da84fb01e6e78::t_1d83a00013bbd7 119-144
+  s_8da84fb01e6e78::t_8812e9117c5653 109
+  s_8da84fb01e6e78::t_8431c7d34a24d6 87-97
+  s_8da84fb01e6e78::t_6849e98748bd4e 209,216-227,240-242,248-252,254-256,263,265-281
+crates/markdown_preview/src/markdown_preview.rs
+  s_8da84fb01e6e78::t_67b9ade50a4e0f 203
+  s_8da84fb01e6e78::t_ebb7f414727a5d 39-44
+  s_8da84fb01e6e78::t_8be04ea176fd6a 200-202
+  s_8da84fb01e6e78::t_4ef07dd9737e93 65-189
+crates/markdown_preview/src/markdown_preview_view.rs
+  s_8da84fb01e6e78::t_45452bef259e5b 138-148
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "09796d1f080d9891f0ed7462c9d0006d3b387667",
+  "prompts": {},
+  "sessions": {
+    "s_8da84fb01e6e78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f607eaa4-82fc-4c0e-8906-5e4b422680d3",
+        "model": "claude-4.7-opus"
+      },
+      "human_author": "miraclerhe <miraclerhe@tencent.com>"
+    }
+  }
+}
