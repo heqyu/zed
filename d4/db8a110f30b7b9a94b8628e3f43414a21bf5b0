@@ -1,0 +1,19 @@
+crates/markdown_preview/src/markdown_preview_view.rs
+  s_8da84fb01e6e78::t_a714360d49a51d 1007-1028
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "d4db8a110f30b7b9a94b8628e3f43414a21bf5b0",
+  "prompts": {},
+  "sessions": {
+    "s_8da84fb01e6e78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f607eaa4-82fc-4c0e-8906-5e4b422680d3",
+        "model": "claude-4.7-opus"
+      },
+      "human_author": "miraclerhe <miraclerhe@tencent.com>"
+    }
+  }
+}
