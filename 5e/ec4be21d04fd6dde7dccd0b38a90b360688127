@@ -1,0 +1,19 @@
+crates/agent_ui/src/optimize_prompt.txt
+  s_8da84fb01e6e78::t_ec1d6f445d1a76 3,5-9,13-16,21,25,38,50,63,71-93,105,108,111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5eec4be21d04fd6dde7dccd0b38a90b360688127",
+  "prompts": {},
+  "sessions": {
+    "s_8da84fb01e6e78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f607eaa4-82fc-4c0e-8906-5e4b422680d3",
+        "model": "claude-4.7-opus"
+      },
+      "human_author": "miraclerhe <miraclerhe@tencent.com>"
+    }
+  }
+}
