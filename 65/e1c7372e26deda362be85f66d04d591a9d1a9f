@@ -1,0 +1,22 @@
+crates/git_ui/src/git_panel.rs
+  s_8da84fb01e6e78::t_66e065438ad949 3094-3102,3126-3129,3131-3143,3148-3153,3155-3158,3161-3171,3173-3194
+  s_8da84fb01e6e78::t_24b6021c5417ac 3130,3154,3172
+crates/git/src/repository.rs
+  s_8da84fb01e6e78::t_1a273aec84cb9f 2269-2272,2275-2277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "65e1c7372e26deda362be85f66d04d591a9d1a9f",
+  "prompts": {},
+  "sessions": {
+    "s_8da84fb01e6e78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f607eaa4-82fc-4c0e-8906-5e4b422680d3",
+        "model": "claude-4.7-opus"
+      },
+      "human_author": "miraclerhe <miraclerhe@tencent.com>"
+    }
+  }
+}
