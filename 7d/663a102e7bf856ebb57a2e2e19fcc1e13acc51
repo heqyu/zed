@@ -1,0 +1,53 @@
+crates/editor/src/actions.rs
+  s_8da84fb01e6e78::t_6828c965284fd9 894-898
+crates/settings/src/vscode_import.rs
+  s_8da84fb01e6e78::t_c6067ffbb8944d 291
+crates/zed/src/zed/quick_action_bar.rs
+  s_8da84fb01e6e78::t_8431c7d34a24d6 87-96
+  s_8da84fb01e6e78::t_1d83a00013bbd7 119-142
+  s_8da84fb01e6e78::t_66df3ac0eefe57 210-215,229-239,243-247,257-262,264,281-283
+  s_8da84fb01e6e78::t_6849e98748bd4e 216-228,240-242,248-256,263,265-280
+  s_8da84fb01e6e78::t_8812e9117c5653 109
+  s_8da84fb01e6e78::t_195b2f40deb06c 797
+  s_8da84fb01e6e78::t_c502bf0f91c789 9
+crates/zed/src/zed/quick_action_bar/preview.rs
+  s_8da84fb01e6e78::t_1fcd07cdddccdc 5,12
+  s_8da84fb01e6e78::t_2139eaf9a36b33 37-45,49-51
+crates/markdown_preview/src/markdown_preview.rs
+  s_8da84fb01e6e78::t_73f26d4237f8e1 7,11,184,201,241-248,268
+  s_8da84fb01e6e78::t_819a403d86a253 228-231,233
+  s_8da84fb01e6e78::t_4ef07dd9737e93 65-72,76,79-80,87-95,102-134,136-176,178-180
+  s_8da84fb01e6e78::t_455d9d66db096e 73-75,77-78,81-86,96-101,135,177
+  s_8da84fb01e6e78::t_8be04ea176fd6a 191-193
+  s_8da84fb01e6e78::t_ebb7f414727a5d 39-44
+  s_8da84fb01e6e78::t_288876cec02a73 232,234-235
+  s_8da84fb01e6e78::t_67b9ade50a4e0f 194
+  s_8da84fb01e6e78::t_84454baef8a6c2 1-6,8-10,56-64,181-183,185-190,195-200,202-227,236-240,249-267,269-276
+crates/settings_content/src/editor.rs
+  s_8da84fb01e6e78::t_25315553973a81 139-144
+crates/editor/src/editor_settings.rs
+  s_8da84fb01e6e78::t_304e0937e97c98 276
+  s_8da84fb01e6e78::t_43438deb31913b 47
+crates/markdown_preview/src/markdown_preview_view.rs
+  s_8da84fb01e6e78::t_45452bef259e5b 140-148
+  s_8da84fb01e6e78::t_a714360d49a51d 1007-1027
+crates/editor/src/editor_view_mode_memory.rs
+  s_8da84fb01e6e78::t_1924e0df1612b9 1-15,17-49,57-58,60-64,66-69,71-73,75-76
+  s_8da84fb01e6e78::t_aa578de70ae6f8 16,50-56,59,65,70,74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7d663a102e7bf856ebb57a2e2e19fcc1e13acc51",
+  "prompts": {},
+  "sessions": {
+    "s_8da84fb01e6e78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f607eaa4-82fc-4c0e-8906-5e4b422680d3",
+        "model": "claude-4.7-opus"
+      },
+      "human_author": "miraclerhe <miraclerhe@tencent.com>"
+    }
+  }
+}
