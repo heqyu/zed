@@ -1,0 +1,21 @@
+crates/agent_ui/src/conversation_view/thread_view.rs
+  s_8da84fb01e6e78::t_22cc67b589807c 4628-4640
+crates/git_ui/src/git_panel.rs
+  s_8da84fb01e6e78::t_043e5dac13eecc 2828-2838
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7d804dfa3e0f93162633c4e11a67f48fbe71c5bc",
+  "prompts": {},
+  "sessions": {
+    "s_8da84fb01e6e78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f607eaa4-82fc-4c0e-8906-5e4b422680d3",
+        "model": "claude-4.7-opus"
+      },
+      "human_author": "miraclerhe <miraclerhe@tencent.com>"
+    }
+  }
+}
