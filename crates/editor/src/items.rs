@@ -874,22 +874,10 @@ impl Item for Editor {
     }
 
     // Note: this mirrors the logic in `Editor::toggle_read_only`, but is reachable
-    // without relying on focus-based action dispatch.
-    fn toggle_read_only(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(buffer) = self.buffer.read(cx).as_singleton() {
-            buffer.update(cx, |buffer, cx| {
-                buffer.set_capability(
-                    match buffer.capability() {
-                        Capability::ReadWrite => Capability::Read,
-                        Capability::Read => Capability::ReadWrite,
-                        Capability::ReadOnly => Capability::ReadOnly,
-                    },
-                    cx,
-                );
-            });
-        }
-        cx.notify();
-        window.refresh();
+    // without relying on focus-based action dispatch. Both code paths now keep
+    // the editor flag, buffer Capability, and session memory in sync.
+    fn toggle_read_only(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_read_only_impl(cx);
     }
 
     fn has_deleted_file(&self, cx: &App) -> bool {

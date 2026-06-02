@@ -900,11 +900,11 @@ actions!(
         ToggleSelectionMenu,
         /// Toggles soft wrap mode.
         ToggleSoftWrap,
-        /// Toggles the editor's read-only flag (user input gate). Distinct
-        /// from `workspace::ToggleReadOnlyFile`, which flips the underlying
-        /// buffer's Capability — that one would block AI agents and other
-        /// non-user edit paths too. This action only blocks user input from
-        /// inside the editor.
+        /// Toggles the editor's read-only state across all layers: the
+        /// editor-level flag (user input gate), the buffer's Capability
+        /// (AI / LSP / external edit gate), and the session-level
+        /// `EditorViewModeMemory`. Behavior is identical to
+        /// `workspace::ToggleReadOnlyFile`.
         ToggleEditorReadOnly,
         /// Toggles the tab bar display.
         ToggleTabBar,

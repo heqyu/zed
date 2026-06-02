@@ -21,8 +21,8 @@ pub mod display_map;
 mod document_colors;
 mod document_links;
 mod document_symbols;
-pub mod editor_view_mode_memory;
 mod editor_settings;
+pub mod editor_view_mode_memory;
 mod element;
 mod fold;
 mod folding_ranges;
@@ -1709,7 +1709,8 @@ impl Editor {
             if let Some(path) = path
                 && !is_markdown
             {
-                let remembered = crate::editor_view_mode_memory::EditorViewModeMemory::get(cx, &path);
+                let remembered =
+                    crate::editor_view_mode_memory::EditorViewModeMemory::get(cx, &path);
                 let should_be_read_only = match remembered {
                     Some(mode) => mode.is_source_read_only(),
                     None => true,
@@ -3083,7 +3084,13 @@ impl Editor {
 
     pub fn capability(&self, cx: &App) -> Capability {
         if self.read_only {
-            Capability::ReadOnly
+            // User-toggled read-only maps to Capability::Read ("mutable
+            // replica, toggled to be only readable"), NOT
+            // Capability::ReadOnly which is reserved for hard read-only
+            // replicas (e.g. macro-expansion buffers, split-diff views).
+            // This distinction lets the pane context menu show
+            // "Make File Editable" for user-toggled files.
+            Capability::Read
         } else {
             self.buffer.read(cx).capability()
         }
@@ -5658,47 +5665,46 @@ impl Editor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(buffer) = self.buffer.read(cx).as_singleton() {
-            buffer.update(cx, |buffer, cx| {
-                buffer.set_capability(
-                    match buffer.capability() {
-                        Capability::ReadWrite => Capability::Read,
-                        Capability::Read => Capability::ReadWrite,
-                        Capability::ReadOnly => Capability::ReadOnly,
-                    },
-                    cx,
-                );
-            })
-        }
+        self.toggle_read_only_impl(cx);
     }
 
-    /// Toolbar toggle's action handler — flips only `self.read_only` and
-    /// leaves the buffer's `Capability` alone. That keeps AI agent / LSP /
-    /// external editor edit paths unblocked, in contrast to
-    /// [`toggle_read_only`] which flips the buffer's capability.
+    /// Toolbar toggle's action handler — flips the read-only state.
     ///
-    /// Also writes the new state to `EditorViewModeMemory` so reopening the
-    /// same file in this session restores the user's choice instead of
-    /// snapping back to the default.
+    /// Keeps the editor-level `read_only` flag, the buffer's `Capability`,
+    /// and the session-level `EditorViewModeMemory` all in sync so that
+    /// both user input gating and AI / LSP / external edit gating behave
+    /// identically regardless of which toggle path was used.
     pub fn toggle_editor_read_only(
         &mut self,
         _: &ToggleEditorReadOnly,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.read_only = !self.read_only;
-        let new_mode = if self.read_only {
-            crate::editor_view_mode_memory::EditorViewMode::SourceReadOnly
-        } else {
-            crate::editor_view_mode_memory::EditorViewMode::SourceEditable
-        };
-        if let Some(path) = self
-            .buffer
-            .read(cx)
-            .as_singleton()
-            .and_then(|b| b.read(cx).file().map(|f| f.path().clone()))
-        {
-            crate::editor_view_mode_memory::EditorViewModeMemory::set(cx, path, new_mode);
+        self.toggle_read_only_impl(cx);
+    }
+
+    /// Shared implementation that toggles read-only state across all layers:
+    /// editor flag, buffer Capability, and session memory.
+    fn toggle_read_only_impl(&mut self, cx: &mut Context<Self>) {
+        if let Some(buffer) = self.buffer.read(cx).as_singleton() {
+            let new_read_only = buffer.update(cx, |buffer, cx| {
+                let new_cap = match buffer.capability() {
+                    Capability::ReadWrite => Capability::Read,
+                    Capability::Read => Capability::ReadWrite,
+                    Capability::ReadOnly => Capability::ReadOnly,
+                };
+                buffer.set_capability(new_cap, cx);
+                matches!(new_cap, Capability::Read | Capability::ReadOnly)
+            });
+            self.read_only = new_read_only;
+            if let Some(path) = buffer.read(cx).file().map(|f| f.path().clone()) {
+                let new_mode = if self.read_only {
+                    crate::editor_view_mode_memory::EditorViewMode::SourceReadOnly
+                } else {
+                    crate::editor_view_mode_memory::EditorViewMode::SourceEditable
+                };
+                crate::editor_view_mode_memory::EditorViewModeMemory::set(cx, path, new_mode);
+            }
         }
         cx.notify();
     }
