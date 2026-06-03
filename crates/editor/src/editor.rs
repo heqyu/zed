@@ -5685,18 +5685,32 @@ impl Editor {
 
     /// Shared implementation that toggles read-only state across all layers:
     /// editor flag, buffer Capability, and session memory.
+    ///
+    /// The editor flag (`self.read_only`) is the source of truth — it is
+    /// flipped first, then the buffer's Capability is synced to match.
+    /// This handles the case where `set_read_only(true)` was called at
+    /// open time without touching the buffer, leaving them temporarily
+    /// out of sync.
     fn toggle_read_only_impl(&mut self, cx: &mut Context<Self>) {
+        self.read_only = !self.read_only;
+        let new_read_only = self.read_only;
         if let Some(buffer) = self.buffer.read(cx).as_singleton() {
-            let new_read_only = buffer.update(cx, |buffer, cx| {
-                let new_cap = match buffer.capability() {
-                    Capability::ReadWrite => Capability::Read,
-                    Capability::Read => Capability::ReadWrite,
-                    Capability::ReadOnly => Capability::ReadOnly,
+            buffer.update(cx, |buffer, cx| {
+                let new_cap = if new_read_only {
+                    match buffer.capability() {
+                        Capability::ReadWrite => Capability::Read,
+                        Capability::ReadOnly => Capability::ReadOnly,
+                        other => other,
+                    }
+                } else {
+                    match buffer.capability() {
+                        Capability::Read => Capability::ReadWrite,
+                        Capability::ReadOnly => Capability::ReadOnly,
+                        other => other,
+                    }
                 };
                 buffer.set_capability(new_cap, cx);
-                matches!(new_cap, Capability::Read | Capability::ReadOnly)
             });
-            self.read_only = new_read_only;
             if let Some(path) = buffer.read(cx).file().map(|f| f.path().clone()) {
                 let new_mode = if self.read_only {
                     crate::editor_view_mode_memory::EditorViewMode::SourceReadOnly

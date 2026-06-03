@@ -240,9 +240,11 @@ impl Render for QuickActionBar {
                 if is_md_source {
                     ui::IconName::Eye
                 } else if is_read_only {
-                    IconName::FileLock
-                } else {
+                    // Read-only → show Pencil, meaning "click to switch to edit mode"
                     IconName::Pencil
+                } else {
+                    // Editable → show Lock, meaning "click to switch to read-only mode"
+                    IconName::FileLock
                 },
                 is_read_only,
                 if is_md_source {
@@ -272,11 +274,7 @@ impl Render for QuickActionBar {
                             }
                         } else {
                             editor.update(cx, |editor, cx| {
-                                editor.toggle_editor_read_only(
-                                    &ToggleEditorReadOnly,
-                                    window,
-                                    cx,
-                                );
+                                editor.toggle_editor_read_only(&ToggleEditorReadOnly, window, cx);
                             });
                         }
                     }
