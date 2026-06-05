@@ -80,6 +80,7 @@ use workspace::{
 };
 use worktree::CreatedEntry;
 use zed_actions::{
+    agent,
     project_panel::{Toggle, ToggleFocus},
     workspace::OpenWithSystem,
 };
@@ -1081,6 +1082,8 @@ impl ProjectPanel {
         });
 
         if let Some((worktree, entry)) = self.selected_sub_entry(cx) {
+            let entry_path_proto = entry.path.to_proto();
+            let entry_worktree_id = usize::from(worktree_id);
             let auto_fold_dirs = ProjectPanelSettings::get_global(cx).auto_fold_dirs;
             let worktree = worktree.read(cx);
             let is_root = Some(entry) == worktree.root_entry();
@@ -1179,6 +1182,21 @@ impl ProjectPanel {
                                 "Copy Relative Path",
                                 Box::new(zed_actions::workspace::CopyRelativePath),
                             )
+                            .when(is_local, |menu| {
+                                let project_path_string = entry_path_proto.clone();
+                                let wid = entry_worktree_id;
+                                menu.separator().item({
+                                    ContextMenuEntry::new("Add to Agent Thread").handler(
+                                        move |window, cx| {
+                                            let action = agent::AddFileToThread {
+                                                worktree_id: wid,
+                                                path: project_path_string.clone(),
+                                            };
+                                            window.dispatch_action(action.boxed_clone(), cx);
+                                        },
+                                    )
+                                })
+                            })
                             .when(has_git_repo, |menu| {
                                 menu.separator()
                                     .when(!is_dir && self.has_git_changes(entry_id), |menu| {

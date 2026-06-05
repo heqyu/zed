@@ -545,6 +545,15 @@ pub mod agent {
         pub base_ref: SharedString,
     }
 
+    /// Add a file as a mention to the active agent thread.
+    #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = agent)]
+    #[serde(deny_unknown_fields)]
+    pub struct AddFileToThread {
+        pub worktree_id: usize,
+        pub path: String,
+    }
+
     /// A single merge conflict region extracted from a file.
     #[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
     pub struct ConflictContent {

@@ -25,8 +25,8 @@ use settings::{LanguageModelProviderSetting, LanguageModelSelection};
 use zed_actions::{
     DecreaseBufferFontSize, IncreaseBufferFontSize, ResetBufferFontSize,
     agent::{
-        AddSelectionToThread, ConflictContent, LogoutAgent, OpenSettings, ReauthenticateAgent,
-        ResetAgentZoom, ResetOnboarding, ResolveConflictedFilesWithAgent,
+        AddFileToThread, AddSelectionToThread, ConflictContent, LogoutAgent, OpenSettings,
+        ReauthenticateAgent, ResetAgentZoom, ResetOnboarding, ResolveConflictedFilesWithAgent,
         ResolveConflictsWithAgent, ReviewBranchDiff,
     },
     assistant::{
@@ -749,6 +749,37 @@ pub fn init(cx: &mut App) {
                                             window.focus(&view.focus_handle(cx), cx);
                                         });
                                     }
+                                }
+                            });
+                        });
+                    },
+                )
+                .register_action(
+                    |workspace: &mut Workspace, action: &AddFileToThread, window, cx| {
+                        let Some(agent_panel) = workspace.panel::<AgentPanel>(cx) else {
+                            return;
+                        };
+                        if !agent_panel.focus_handle(cx).contains_focused(window, cx) {
+                            workspace.focus_panel::<AgentPanel>(window, cx);
+                        }
+                        let Ok(path) = util::rel_path::RelPath::from_proto(&action.path) else {
+                            return;
+                        };
+                        let project_path = ProjectPath {
+                            worktree_id: settings::WorktreeId::from_usize(action.worktree_id),
+                            path,
+                        };
+                        agent_panel.update(cx, |_panel, cx| {
+                            cx.defer_in(window, move |panel, window, cx| {
+                                if let Some(conversation_view) = panel.active_conversation_view() {
+                                    conversation_view.update(cx, |cv, cx| {
+                                        cv.insert_dragged_files(
+                                            vec![project_path],
+                                            Vec::new(),
+                                            window,
+                                            cx,
+                                        );
+                                    });
                                 }
                             });
                         });
