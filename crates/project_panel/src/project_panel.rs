@@ -6586,6 +6586,45 @@ impl StickyCandidate for StickyProjectPanelCandidate {
     }
 }
 
+impl ProjectPanel {
+    /// 渲染项目面板顶部标题栏：左侧显示 "Project" 标题，右侧显示 "Collapse All" 按钮。
+    /// 返回 `AnyElement` 以避免与 `&self` 关联的 lifetime 干扰外层 `render` 中的可变借用。
+    fn render_header(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let focus_handle = self.focus_handle.clone();
+        h_flex()
+            .id("project-panel-header")
+            .h(px(28.))
+            .w_full()
+            .px_2()
+            .flex_none()
+            .justify_between()
+            .border_b_1()
+            .border_color(cx.theme().colors().border_variant)
+            .child(
+                Label::new("Project")
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+            )
+            .child(
+                IconButton::new("project-panel-collapse-all", IconName::ListCollapse)
+                    .icon_size(IconSize::Small)
+                    .icon_color(Color::Muted)
+                    .tooltip(move |_window, cx| {
+                        Tooltip::for_action_in(
+                            "Collapse All",
+                            &CollapseAllEntries,
+                            &focus_handle,
+                            cx,
+                        )
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.collapse_all_entries(&CollapseAllEntries, window, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+}
+
 fn item_width_estimate(depth: usize, item_text_chars: usize, is_symlink: bool) -> usize {
     const ICON_SIZE_FACTOR: usize = 2;
     let mut item_width = depth * ICON_SIZE_FACTOR + item_text_chars;
@@ -6598,6 +6637,9 @@ fn item_width_estimate(depth: usize, item_text_chars: usize, is_symlink: bool) -
 impl Render for ProjectPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let has_worktree = !self.state.visible_entries.is_empty();
+        // 提前生成顶部标题栏元素，避免后续 `let project = self.project.read(cx)` 的不可变借用与
+        // `render_header` 内部 `cx.listener(...)` 所需的可变借用冲突。
+        let header = has_worktree.then(|| self.render_header(window, cx));
         let project = self.project.read(cx);
         let panel_settings = ProjectPanelSettings::get_global(cx);
         let indent_size = panel_settings.indent_size;
@@ -6772,6 +6814,7 @@ impl Render for ProjectPanel {
                 .track_focus(&self.focus_handle(cx))
                 .child(
                     v_flex()
+                        .children(header)
                         .child(
                             uniform_list("entries", item_count, {
                                 cx.processor(|this, range: Range<usize>, window, cx| {
