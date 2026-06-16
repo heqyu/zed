@@ -8,6 +8,7 @@ use itertools::Itertools as _;
 use language::LanguageName;
 use remote::RemoteClient;
 use settings::{Settings, SettingsLocation};
+use sha2::{Digest, Sha256};
 use std::{
     borrow::Cow,
     path::{Path, PathBuf},
@@ -373,6 +374,17 @@ impl Project {
 
         let path_style = self.path_style(cx);
 
+        // 提前在主线程上抓取所有可见 worktree 的绝对路径，作为工作区指纹的来源。
+        // 远程项目场景下 worktree 路径属于远端文件系统，不能用于本地 HISTFILE，
+        // 因此远程模式下置空，注入函数会直接跳过。
+        let workspace_worktree_paths: Vec<PathBuf> = if is_via_remote {
+            Vec::new()
+        } else {
+            self.visible_worktrees(cx)
+                .map(|wt| wt.read(cx).abs_path().to_path_buf())
+                .collect()
+        };
+
         // Prepare a task for resolving the environment
         let env_task =
             self.resolve_directory_environment(&env_shell, path.clone(), remote_client.clone(), cx);
@@ -382,6 +394,15 @@ impl Project {
             let shell_kind = ShellKind::new(&shell, path_style.is_windows());
             let mut env = env_task.await.unwrap_or_default();
             env.extend(settings.env);
+
+            // 在 settings.env 已合并、但远程 shell 包装尚未发生之前注入 HISTFILE。
+            // 这样既能尊重用户显式设置的 HISTFILE，又能在没有设置时启用按工作区隔离的历史。
+            inject_workspace_bash_history(
+                is_via_remote,
+                shell_kind,
+                &workspace_worktree_paths,
+                &mut env,
+            );
 
             let activation_script = maybe!(async {
                 for toolchain in toolchains {
@@ -713,6 +734,123 @@ fn quote_cmd_command_arg_for_outer_shell(arg: &str, shell_kind: ShellKind) -> Op
     }
 }
 
+/// 计算工作区身份指纹。
+/// 输入是已规范化排序的 worktree 绝对路径列表，输出取 SHA-256 前 16 位十六进制。
+/// 同一组工作区路径在不同时间打开时得到相同哈希，从而稳定指向同一份历史文件。
+fn workspace_history_id(worktree_abs_paths: &[PathBuf]) -> String {
+    let mut sorted: Vec<&Path> = worktree_abs_paths.iter().map(|p| p.as_path()).collect();
+    sorted.sort();
+    let mut hasher = Sha256::new();
+    for (idx, path) in sorted.iter().enumerate() {
+        if idx > 0 {
+            hasher.update(b"\0");
+        }
+        // 使用 to_string_lossy 已足够稳定：同一台机器上路径的字节表示固定。
+        hasher.update(path.to_string_lossy().as_bytes());
+    }
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(16);
+    for byte in &digest[..8] {
+        hex.push_str(&format!("{:02x}", byte));
+    }
+    hex
+}
+
+/// 返回当前工作区对应的 bash 历史文件路径。
+/// 形如 `<data_dir>/terminal_history/<workspace_id>/bash_history`。
+/// 如果工作区无任何 worktree（例如尚未打开任何文件夹），返回 None，
+/// 这种情况下走 shell 默认 HISTFILE，等同于全局共享。
+fn workspace_bash_history_path(worktree_abs_paths: &[PathBuf]) -> Option<PathBuf> {
+    if worktree_abs_paths.is_empty() {
+        return None;
+    }
+    let id = workspace_history_id(worktree_abs_paths);
+    Some(
+        paths::data_dir()
+            .join("terminal_history")
+            .join(id)
+            .join("bash_history"),
+    )
+}
+
+/// 确保历史文件存在；若是首次创建，尝试用全局 `~/.bash_history` 作为 fallback 内容预填充，
+/// 这样新工作区的历史从已有命令出发，而非完全空白。
+/// 失败仅记录日志，不阻塞终端启动。
+fn ensure_workspace_bash_history_exists(history_path: &Path) {
+    if history_path.exists() {
+        return;
+    }
+    if let Some(parent) = history_path.parent() {
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            log::warn!(
+                "failed to create terminal history dir {}: {err}",
+                parent.display()
+            );
+            return;
+        }
+    }
+    let global = paths::home_dir().join(".bash_history");
+    let seed_result = if global.exists() {
+        std::fs::copy(&global, history_path).map(|_| ())
+    } else {
+        std::fs::File::create(history_path).map(|_| ())
+    };
+    if let Err(err) = seed_result {
+        log::warn!(
+            "failed to seed terminal history file {}: {err}",
+            history_path.display()
+        );
+    }
+}
+
+/// 当前终端会话是否应使用每工作区独立的 bash 历史文件。
+/// 条件：
+/// - 不是远程终端；
+/// - shell 属于 POSIX 家族（sh/bash/zsh/ksh 等都支持 HISTFILE）；
+/// - 用户没有显式注入 HISTFILE（settings.env 或环境变量）。
+fn should_use_workspace_bash_history(
+    is_remote: bool,
+    shell_kind: ShellKind,
+    env: &HashMap<String, String>,
+) -> bool {
+    if is_remote {
+        return false;
+    }
+    if shell_kind != ShellKind::Posix {
+        return false;
+    }
+    if env.contains_key("HISTFILE") {
+        return false;
+    }
+    true
+}
+
+/// 入口函数：若条件满足，把 HISTFILE 注入到 env 并保证文件就绪。
+/// `worktree_abs_paths` 用于派生稳定的工作区指纹；空数组时不会做任何事。
+fn inject_workspace_bash_history(
+    is_remote: bool,
+    shell_kind: ShellKind,
+    worktree_abs_paths: &[PathBuf],
+    env: &mut HashMap<String, String>,
+) {
+    if !should_use_workspace_bash_history(is_remote, shell_kind, env) {
+        return;
+    }
+    let Some(history_path) = workspace_bash_history_path(worktree_abs_paths) else {
+        return;
+    };
+    ensure_workspace_bash_history_exists(&history_path);
+    env.insert(
+        "HISTFILE".to_string(),
+        history_path.to_string_lossy().into_owned(),
+    );
+    // 让 bash 退出时把当前会话历史追加合并进文件，避免多终端互相覆盖。
+    env.entry("HISTSIZE".to_string())
+        .or_insert_with(|| "10000".to_string());
+    env.entry("HISTFILESIZE".to_string())
+        .or_insert_with(|| "20000".to_string());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -794,5 +932,81 @@ mod tests {
             format_task_for_activation(&task, ShellKind::PowerShell, "powershell.exe", true),
             "&cargo test 'some test'"
         );
+    }
+
+    #[test]
+    fn workspace_history_id_is_stable_and_order_insensitive() {
+        let a = PathBuf::from("/home/u/projects/alpha");
+        let b = PathBuf::from("/home/u/projects/beta");
+
+        let id1 = workspace_history_id(&[a.clone(), b.clone()]);
+        let id2 = workspace_history_id(&[b.clone(), a.clone()]);
+        let id3 = workspace_history_id(&[a.clone(), b.clone()]);
+
+        assert_eq!(id1, id2, "顺序不应影响指纹");
+        assert_eq!(id1, id3, "同一组路径必须给出相同指纹");
+        assert_eq!(id1.len(), 16, "指纹必须为 16 位十六进制");
+        assert!(
+            id1.chars().all(|c| c.is_ascii_hexdigit()),
+            "指纹必须是合法 hex"
+        );
+    }
+
+    #[test]
+    fn workspace_history_id_differs_for_different_workspaces() {
+        let id1 = workspace_history_id(&[PathBuf::from("/home/u/alpha")]);
+        let id2 = workspace_history_id(&[PathBuf::from("/home/u/beta")]);
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn workspace_bash_history_path_returns_none_for_empty_worktrees() {
+        assert!(workspace_bash_history_path(&[]).is_none());
+    }
+
+    #[test]
+    fn should_use_workspace_bash_history_respects_user_histfile() {
+        let mut env = HashMap::default();
+        env.insert("HISTFILE".to_string(), "/tmp/custom".to_string());
+        assert!(!should_use_workspace_bash_history(
+            false,
+            ShellKind::Posix,
+            &env
+        ));
+    }
+
+    #[test]
+    fn should_use_workspace_bash_history_skips_remote() {
+        let env = HashMap::default();
+        assert!(!should_use_workspace_bash_history(
+            true,
+            ShellKind::Posix,
+            &env
+        ));
+    }
+
+    #[test]
+    fn should_use_workspace_bash_history_skips_non_posix() {
+        let env = HashMap::default();
+        assert!(!should_use_workspace_bash_history(
+            false,
+            ShellKind::PowerShell,
+            &env
+        ));
+        assert!(!should_use_workspace_bash_history(
+            false,
+            ShellKind::Fish,
+            &env
+        ));
+    }
+
+    #[test]
+    fn should_use_workspace_bash_history_accepts_default_posix() {
+        let env = HashMap::default();
+        assert!(should_use_workspace_bash_history(
+            false,
+            ShellKind::Posix,
+            &env
+        ));
     }
 }
